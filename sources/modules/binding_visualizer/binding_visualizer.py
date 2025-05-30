@@ -381,6 +381,97 @@ def visualize_structure(pdb_data, width, height, chain_style, residue_style, out
         {'chain': m.get('chain'), 'resnum': m.get('resnum'), 'mutation': m.get('mutation')}
         for m in mutation_list
     ]
+    # --- Sidebar HTML ---
+    sidebar_html = ("""
+    <div id='bv-sidebar' style='position:fixed;top:0;left:0;width:260px;height:100vh;background:#f8f9fa;border-right:1px solid #e1e4e8;z-index:1000;padding:18px 12px 12px 18px;overflow-y:auto;font-family:Arial,sans-serif;'>
+        <h3 style='margin-top:0;color:#2a5298;'>Controls</h3>
+        <div style='margin-bottom:12px;'>
+            <b>Chains:</b><br>
+            """ + ''.join([f"<label style='display:block;'><input type='checkbox' class='bv-chain' value='{c}' checked> {c}</label>" for c in js_chains]) + """
+        </div>
+        <div style='margin-bottom:12px;'>
+            <b>Ligands:</b><br>
+            """ + ''.join([f"<label style='display:block;'><input type='checkbox' class='bv-ligand' value='{l}' checked> {l}</label>" for l in js_ligands]) + """
+        </div>
+        <div style='margin-bottom:12px;'>
+            <b>Mutations:</b><br>
+            """ + ''.join([f"<label style='display:block;'><input type='checkbox' class='bv-mutation' value='{m['chain']}:{m['resnum']}'> {m['mutation']} ({m['chain']}:{m['resnum']})</label>" for m in js_mutations]) + """
+        </div>
+        <div style='margin-bottom:12px;'>
+            <b>Style:</b><br>
+            <select id='bv-style'>
+                <option value='cartoon'>Cartoon</option>
+                <option value='stick'>Stick</option>
+                <option value='sphere'>Sphere</option>
+                <option value='line'>Line</option>
+            </select>
+        </div>
+        <div style='margin-bottom:12px;'>
+            <b>Color:</b><br>
+            <select id='bv-color'>
+                <option value='chain'>By Chain</option>
+                <option value='element'>By Element</option>
+                <option value='spectrum'>Spectrum</option>
+                <option value='residue'>By Residue</option>
+            </select>
+        </div>
+        <div style='margin-bottom:12px;'>
+            <button id='bv-export-png' style='width:100%;padding:6px 0;background:#2a5298;color:#fff;border:none;border-radius:4px;cursor:pointer;'>Export PNG</button>
+        </div>
+    </div>
+    <style>@media (max-width: 600px) { #bv-sidebar { display:none; } }</style>
+    <script type='text/javascript'>
+    function bv_update_viewer() {
+        if(typeof window.viewer === 'undefined') return;
+        // Chains
+        var chains = Array.from(document.querySelectorAll('.bv-chain:checked')).map(cb=>cb.value);
+        // Ligands
+        var ligands = Array.from(document.querySelectorAll('.bv-ligand:checked')).map(cb=>cb.value);
+        // Mutations
+        var mutations = Array.from(document.querySelectorAll('.bv-mutation:checked')).map(cb=>cb.value);
+        // Style
+        var style = document.getElementById('bv-style').value;
+        // Color
+        var color = document.getElementById('bv-color').value;
+        window.viewer.setStyle({}, {});
+        // Show selected chains
+        chains.forEach(function(chain) {
+            var styleObj = {};
+            styleObj[style] = {colorscheme: color+'Carbon'};
+            window.viewer.setStyle({chain: chain}, styleObj);
+        });
+        // Show selected ligands
+        ligands.forEach(function(lig) {
+            window.viewer.setStyle({resn: lig}, {stick: {colorscheme: 'yellowCarbon'}});
+        });
+        // Highlight selected mutations
+        mutations.forEach(function(mut) {
+            var parts = mut.split(':');
+            if(parts.length===2) {
+                window.viewer.setStyle({chain: parts[0], resi: parseInt(parts[1])}, {stick: {colorscheme: 'magentaCarbon'}});
+            }
+        });
+        window.viewer.render();
+    }
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.bv-chain, .bv-ligand, .bv-mutation').forEach(function(cb) {
+            cb.addEventListener('change', bv_update_viewer);
+        });
+        document.getElementById('bv-style').addEventListener('change', bv_update_viewer);
+        document.getElementById('bv-color').addEventListener('change', bv_update_viewer);
+        var pngBtn = document.getElementById('bv-export-png');
+        if(pngBtn) pngBtn.onclick = function() {
+            if(window.viewer) window.viewer.pngURI(function(uri){
+                var a = document.createElement('a');
+                a.href = uri; a.download = 'structure.png'; a.click();
+            });
+        };
+    });
+    </script>
+    <div style='margin-left:260px;'></div>
+    """)
+    # --- End Sidebar HTML ---
+
     controls_html = (
         "<div style='margin:16px 0;padding:12px 16px;background:#f8f9fa;border-radius:8px;border:1px solid #e1e4e8;'>"
         "<b>Interactive Controls:</b>"
@@ -438,22 +529,72 @@ def visualize_structure(pdb_data, width, height, chain_style, residue_style, out
     # Save the visualization to an HTML file, prepending info
     with open(output_html, 'w') as html_file:
         html = viewer._make_html()
-        # Patch: assign viewer globally in JS after creation
-        # Find the viewer variable name (e.g., viewer_12345) and assign to window.viewer
         import re
         match = re.search(r'var (viewer_\d+) = null;', html)
-        viewer_var = match.group(1) if match else 'viewer'
-        # Patch the JS: after createViewer, assign to window.viewer
-        html = re.sub(
-            rf'(\$3Dmolpromise\.then\(function\(\) \{{\s*{viewer_var} = \$3Dmol\.createViewer\([^)]+\);)',
-            rf'\1\nwindow.viewer = {viewer_var};',
-            html
-        )
-        # Insert info_html and controls_html after <body> if possible
+        viewer_var = match.group(1) if match else None
+        # Insert sidebar_html at the top of <body>, and wrap the rest in a main content div with margin-left
         if '<body>' in html:
-            html = html.replace('<body>', '<body>' + info_html + controls_html, 1)
+            viewer_div_match = re.search(r'(<div[^>]+id=["\\\']?viewer[^>]*>)', html)
+            if viewer_div_match:
+                viewer_div = viewer_div_match.group(1)
+                # Ensure the viewer div has explicit width/height styles
+                if 'style=' not in viewer_div:
+                    viewer_div_new = viewer_div[:-1] + " style='width:100%;height:100%;min-height:480px;min-width:480px;'" + viewer_div[-1]
+                    html = html.replace(viewer_div, viewer_div_new, 1)
+                else:
+                    viewer_div_new = re.sub(r'style=["\']', "style='min-width:480px;min-height:480px;", viewer_div, 1)
+                    html = html.replace(viewer_div, viewer_div_new, 1)
+                html = html.replace(viewer_div, f"<div id='bv-main' style='margin-left:260px;min-height:600px;'>\n" + viewer_div, 1)
+                html = html.replace('</body>', '</div></body>', 1)
+            html = html.replace('<body>', '<body>' + sidebar_html + info_html + controls_html, 1)
         else:
-            html = info_html + controls_html + html
+            html = sidebar_html + "<div id='bv-main' style='margin-left:260px;min-height:600px;'>" + info_html + controls_html + html + "</div>"
+        # Add robust JS at the end of body to assign window.viewer
+        robust_js = '''<script>\ndocument.addEventListener('DOMContentLoaded', function() {\n  try {\n    var found = false;\n    // Try to assign window.viewer from global variable\n    '''
+        if viewer_var:
+            robust_js += f"if(typeof window.{viewer_var} !== 'undefined' && window.{viewer_var} !== null) {{ window.viewer = window.{viewer_var}; found = true; console.log('[binding_visualizer] window.viewer assigned from {viewer_var}', window.viewer); }}\n"
+        robust_js += '''
+    // Try $3Dmol.viewers
+    if(!found && typeof window.$3Dmol !== 'undefined' && window.$3Dmol.viewers) {
+      for(var k in window.$3Dmol.viewers) {
+        if(window.$3Dmol.viewers[k]) {
+          window.viewer = window.$3Dmol.viewers[k]; found = true;
+          console.log('[binding_visualizer] window.viewer assigned from $3Dmol.viewers', window.viewer);
+          break;
+        }
+      }
+    }
+    // Try by DOM id
+    if(!found) {
+      var div = document.querySelector('div[id^="viewer"]');
+      if(div && typeof $3Dmol !== 'undefined') {
+        try {
+          window.viewer = $3Dmol.getViewer(div);
+          if(window.viewer) { found = true; console.log('[binding_visualizer] window.viewer assigned from $3Dmol.getViewer', window.viewer); }
+        } catch(e) {}
+      }
+    }
+    if(!found) {
+      console.error('[binding_visualizer] 3Dmol viewer not initialized!');
+      var warn = document.createElement('div');
+      warn.style='color:red;font-weight:bold;margin:16px;';
+      warn.innerText='[binding_visualizer] ERROR: 3Dmol viewer failed to initialize.';
+      document.body.insertBefore(warn, document.body.firstChild);
+    } else {
+      console.log('[binding_visualizer] 3Dmol viewer is ready:', window.viewer);
+    }
+  } catch(e) {
+    console.error('[binding_visualizer] Exception during viewer assignment:', e);
+    var warn = document.createElement('div');
+    warn.style='color:red;font-weight:bold;margin:16px;';
+    warn.innerText='[binding_visualizer] ERROR: Exception during 3Dmol viewer assignment.';
+    document.body.insertBefore(warn, document.body.firstChild);
+  }
+});\n</script>'''
+        if '</body>' in html:
+            html = html.replace('</body>', robust_js + '</body>')
+        else:
+            html += robust_js
         html_file.write(html)
     logging.info("Visualization saved to %s", output_html)
     print(Fore.GREEN + f"Visualization saved to {output_html}. Open this file in a browser to view the structure." + Style.RESET_ALL)
