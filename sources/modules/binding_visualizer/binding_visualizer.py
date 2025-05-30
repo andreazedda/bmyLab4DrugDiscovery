@@ -6,6 +6,10 @@ import traceback
 import yaml
 import json
 import os
+import datetime
+import platform
+import getpass
+import pkg_resources
 
 # Load general settings
 # general_settings = pu.load_general_settings()
@@ -14,7 +18,11 @@ import os
 # get name of the current module
 module_name = os.path.splitext(os.path.basename(__file__))[0]
 this_script_folder_path = os.path.dirname(os.path.realpath(__file__))
-with open(os.path.join(this_script_folder_path, module_name + ".yaml"), "r") as config_file:
+config_path = os.path.join(this_script_folder_path, module_name + ".yaml")
+if not os.path.exists(config_path):
+    print(Fore.RED + f"Configuration file {config_path} not found." + Style.RESET_ALL)
+    exit(1)
+with open(config_path, "r") as config_file:
     config = yaml.safe_load(config_file)
 # with open(os.path.join(general_settings['configs_path'], module_name + ".yaml"), "r") as config_file:
 #     config = yaml.safe_load(config_file)
@@ -105,9 +113,89 @@ def visualize_structure(pdb_data, width, height, chain_style, residue_style, out
     viewer.zoom(1.2)
     viewer.render()
 
-    # Save the visualization to an HTML file
+    # Prepare additional HTML info with more color and information
+    # Fetch PDB link
+    pdb_id = config['pdb_id']
+    pdb_link = f"https://www.rcsb.org/structure/{pdb_id}"
+    # Get config file info
+    config_file_info = config_path
+    # Get user and host info
+    user = getpass.getuser()
+    host = platform.node()
+    # Get dependency versions
+    deps = {
+        'py3Dmol': pkg_resources.get_distribution('py3Dmol').version if pkg_resources.working_set.by_key.get('py3dmol') else 'N/A',
+        'requests': pkg_resources.get_distribution('requests').version if pkg_resources.working_set.by_key.get('requests') else 'N/A',
+        'pyyaml': pkg_resources.get_distribution('pyyaml').version if pkg_resources.working_set.by_key.get('pyyaml') else 'N/A',
+    }
+    # Get script version (git commit hash if available)
+    try:
+        import subprocess
+        git_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], cwd=this_script_folder_path).decode().strip()
+    except Exception:
+        git_hash = 'N/A'
+    # Try to get PDB title from the PDB data
+    pdb_title = ''
+    for line in pdb_data.splitlines():
+        if line.startswith('TITLE '):
+            pdb_title += line[10:].strip() + ' '
+    pdb_title = pdb_title.strip()
+
+    info_html = f"""
+    <div style='font-family: Arial, sans-serif; margin-bottom: 10px; background: #f5f7fa; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 18px;'>
+        <h2 style='color: #2a5298; margin-top: 0;'>PDB Structure Viewer</h2>
+        <div style='margin-bottom: 8px;'>
+            <span style='color: #1e8449; font-weight: bold;'>PDB ID:</span> <span style='color: #154360;'><a href='{pdb_link}' target='_blank'>{pdb_id}</a></span>
+        </div>
+        {f"<div style='margin-bottom: 8px;'><span style='color: #76448a; font-weight: bold;'>Title:</span> <span style='color: #154360;'>{pdb_title}</span></div>" if pdb_title else ''}
+        <div style='margin-bottom: 8px;'>
+            <span style='color: #b9770e; font-weight: bold;'>Viewer size:</span> <span style='color: #154360;'>{width} x {height}</span>
+        </div>
+        <div style='margin-bottom: 8px;'>
+            <span style='color: #2874a6; font-weight: bold;'>Chain style:</span> <span style='color: #154360;'>{json.dumps(chain_style)}</span>
+        </div>
+        <div style='margin-bottom: 8px;'>
+            <span style='color: #a93226; font-weight: bold;'>Residue style:</span> <span style='color: #154360;'>{json.dumps(residue_style)}</span>
+        </div>
+        <div style='margin-bottom: 8px;'>
+            <span style='color: #884ea0; font-weight: bold;'>Generated:</span> <span style='color: #154360;'>{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</span>
+        </div>
+        <div style='margin-bottom: 8px;'>
+            <span style='color: #117864; font-weight: bold;'>Script:</span> <span style='color: #154360;'>binding_visualizer.py</span>
+        </div>
+        <div style='margin-bottom: 8px;'>
+            <span style='color: #2874a6; font-weight: bold;'>Config file:</span> <span style='color: #154360;'>{config_file_info}</span>
+        </div>
+        <div style='margin-bottom: 8px;'>
+            <span style='color: #b03a2e; font-weight: bold;'>Python version:</span> <span style='color: #154360;'>{os.sys.version.split()[0]}</span>
+        </div>
+        <div style='margin-bottom: 8px;'>
+            <span style='color: #229954; font-weight: bold;'>Platform:</span> <span style='color: #154360;'>{platform.system()} {platform.release()}</span>
+        </div>
+        <div style='margin-bottom: 8px;'>
+            <span style='color: #d35400; font-weight: bold;'>User/Host:</span> <span style='color: #154360;'>{user}@{host}</span>
+        </div>
+        <div style='margin-bottom: 8px;'>
+            <span style='color: #2874a6; font-weight: bold;'>Instructions:</span> <span style='color: #154360;'>Drag to rotate, scroll to zoom, double-click to center. Hover over atoms for details.</span>
+        </div>
+        <div style='margin-bottom: 8px;'>
+            <span style='color: #2874a6; font-weight: bold;'>Dependencies:</span> <span style='color: #154360;'>py3Dmol {deps['py3Dmol']}, requests {deps['requests']}, pyyaml {deps['pyyaml']}</span>
+        </div>
+        <div style='margin-bottom: 8px;'>
+            <span style='color: #2874a6; font-weight: bold;'>Git commit:</span> <span style='color: #154360;'>{git_hash}</span>
+        </div>
+        <div style='font-size: 12px; color: #888;'>Visualization generated by <b>binding_visualizer.py</b> using <b>py3Dmol</b>.<br>Contact: <a href='mailto:your.email@example.com'>your.email@example.com</a><br>Copyright &copy; {datetime.datetime.now().year}</div>
+    </div>
+    """
+    # Save the visualization to an HTML file, prepending info
     with open(output_html, 'w') as html_file:
-        html_file.write(viewer._make_html())
+        html = viewer._make_html()
+        # Insert info_html after <body> if possible
+        if '<body>' in html:
+            html = html.replace('<body>', '<body>' + info_html, 1)
+        else:
+            html = info_html + html
+        html_file.write(html)
 
     # Log the completion of visualization
     logging.info("Visualization saved to %s", output_html)
