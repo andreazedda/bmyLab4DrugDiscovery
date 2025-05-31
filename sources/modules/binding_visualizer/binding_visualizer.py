@@ -409,55 +409,74 @@ def visualize_structure(pdb_data, width, height, chain_style, residue_style, out
     ])
     # --- New: Interactive Controls Panel ---
     # Build button HTML outside the f-string to avoid curly brace issues
-    chain_buttons = ''.join([
-        f"<button onclick=\"window.viewer.setStyle({{chain: '{c}'}}, {{stick:{{colorscheme:'redCarbon'}}}}); window.viewer.render();\">{c}</button>"
-        for c in js_chains
-    ])
-    ligand_buttons = ''.join([
-        f"<button onclick=\"window.viewer.setStyle({{resn: '{l}'}}, {{stick:{{colorscheme:'orangeCarbon'}}}}); window.viewer.render();\">{l}</button>"
-        for l in js_ligands
-    ])
-    controls_panel = f"""
-    <div id='bv-controls' style='margin:16px 0 24px 260px; padding:12px 16px; background:#f8f9fa; border-radius:8px; border:1px solid #e1e4e8;'>
+    def safe_viewer_call(js_code):
+        return f"if(window.viewer && typeof window.viewer.setStyle==='function'){{{{{js_code}}}}}else{{{{alert('3D viewer not ready yet. Please reload the page.');}}}}"
+    chain_buttons = ''
+    for c in js_chains:
+        js = f"window.viewer.setStyle({{chain: '{c}'}}, {{stick:{{colorscheme:'redCarbon'}}}});window.viewer.render();"
+        chain_buttons += f'<button onclick="{safe_viewer_call(js)}" disabled>{c}</button>'
+    ligand_buttons = ''
+    for l in js_ligands:
+        js = f"window.viewer.setStyle({{resn: '{l}'}}, {{stick:{{colorscheme:'orangeCarbon'}}}});window.viewer.render();"
+        ligand_buttons += f'<button onclick="{safe_viewer_call(js)}" disabled>{l}</button>'
+    reset_all_js = "window.viewer.setStyle({{}}, {{stick:{{}}}});window.viewer.render();"
+    cartoon_js = "window.viewer.setStyle({{}}, {{cartoon:{{}}}});window.viewer.render();"
+    stick_js = "window.viewer.setStyle({{}}, {{stick:{{}}}});window.viewer.render();"
+    sphere_js = "window.viewer.setStyle({{}}, {{sphere:{{}}}});window.viewer.render();"
+    line_js = "window.viewer.setStyle({{}}, {{line:{{}}}});window.viewer.render();"
+    spectrum_js = "window.viewer.setStyle({{}}, {{cartoon: {{color: 'spectrum'}}}});window.viewer.render();"
+    by_chain_js = "window.viewer.setStyle({{}}, {{cartoon: {{color: 'chain'}}}});window.viewer.render();"
+    by_element_js = "window.viewer.setStyle({{}}, {{cartoon: {{color: 'element'}}}});window.viewer.render();"
+    by_residue_js = "window.viewer.setStyle({{}}, {{cartoon: {{color: 'residue'}}}});window.viewer.render();"
+    controls_panel = f'''
+    <div id="bv-controls" style="margin:16px 0 24px 260px; padding:12px 16px; background:#f8f9fa; border-radius:8px; border:1px solid #e1e4e8;">
       <b>Interactive Controls:</b>
-      <div style='margin-top:8px;'>
+      <div style="margin-top:8px;">
         <b>Chains:</b>
         {chain_buttons}
-        <button onclick="window.viewer.setStyle({{}}, {{stick:{{}}}}); window.viewer.render();">Reset All</button>
+        <button onclick="{safe_viewer_call(reset_all_js)}" disabled>Reset All</button>
       </div>
-      <div style='margin-top:8px;'>
+      <div style="margin-top:8px;">
         <b>Ligands:</b>
         {ligand_buttons}
       </div>
-      <div style='margin-top:8px;'>
-        <button onclick="highlightMutations()">Highlight Mutations</button>
+      <div style="margin-top:8px;">
+        <button onclick="highlightMutations()" disabled>Highlight Mutations</button>
       </div>
-      <div style='margin-top:8px;'>
+      <div style="margin-top:8px;">
         <b>Style:</b>
-        <button onclick="window.viewer.setStyle({{}}, {{cartoon:{{}}}}); window.viewer.render();">Cartoon</button>
-        <button onclick="window.viewer.setStyle({{}}, {{stick:{{}}}}); window.viewer.render();">Stick</button>
-        <button onclick="window.viewer.setStyle({{}}, {{sphere:{{}}}}); window.viewer.render();">Sphere</button>
-        <button onclick="window.viewer.setStyle({{}}, {{line:{{}}}}); window.viewer.render();">Line</button>
+        <button onclick="{safe_viewer_call(cartoon_js)}" disabled>Cartoon</button>
+        <button onclick="{safe_viewer_call(stick_js)}" disabled>Stick</button>
+        <button onclick="{safe_viewer_call(sphere_js)}" disabled>Sphere</button>
+        <button onclick="{safe_viewer_call(line_js)}" disabled>Line</button>
       </div>
-      <div style='margin-top:8px;'>
+      <div style="margin-top:8px;">
         <b>Color:</b>
-        <button onclick="window.viewer.setStyle({{}}, {{cartoon: {{color: 'spectrum'}}}}); window.viewer.render();">Spectrum</button>
-        <button onclick="window.viewer.setStyle({{}}, {{cartoon: {{color: 'chain'}}}}); window.viewer.render();">By Chain</button>
-        <button onclick="window.viewer.setStyle({{}}, {{cartoon: {{color: 'element'}}}}); window.viewer.render();">By Element</button>
-        <button onclick="window.viewer.setStyle({{}}, {{cartoon: {{color: 'residue'}}}}); window.viewer.render();">By Residue</button>
+        <button onclick="{safe_viewer_call(spectrum_js)}" disabled>Spectrum</button>
+        <button onclick="{safe_viewer_call(by_chain_js)}" disabled>By Chain</button>
+        <button onclick="{safe_viewer_call(by_element_js)}" disabled>By Element</button>
+        <button onclick="{safe_viewer_call(by_residue_js)}" disabled>By Residue</button>
       </div>
     </div>
     <script>
+      function enableControls() {{{{
+        var btns = document.querySelectorAll('#bv-controls button');
+        btns.forEach(function(b) {{{{ b.disabled = false; }}}});
+      }}}}
       var mutations = {mutation_js_array};
-      function highlightMutations() {{
-        window.viewer.setStyle({{}}, {{}}); // clear
-        mutations.forEach(function(m) {{
-          window.viewer.setStyle({{chain: m.chain, resi: m.resi}}, {{stick: {{colorscheme: 'magentaCarbon'}}}});
-        }});
-        window.viewer.render();
-      }}
+      function highlightMutations() {{{{
+        if(window.viewer && typeof window.viewer.setStyle==='function'){{{{
+          window.viewer.setStyle({{}}, {{}}); // clear
+          mutations.forEach(function(m) {{{{
+            window.viewer.setStyle({{chain: m.chain, resi: m.resi}}, {{stick: {{colorscheme: 'magentaCarbon'}}}});
+          }}}});
+          window.viewer.render();
+        }}}} else {{{{
+          alert('3D viewer not ready yet. Please reload the page.');
+        }}}}
+      }}}}
     </script>
-    """
+    '''
     # --- End Interactive Controls Panel ---
 
     # Save the visualization to an HTML file, prepending info
@@ -531,7 +550,7 @@ def visualize_structure(pdb_data, width, height, chain_style, residue_style, out
                     viewer_div_block = re.sub(r'style="[^"]*"', f'style="{style_val}"', viewer_div_block)
             else:
                 # Insert style attribute
-                viewer_div_block = viewer_div_block.replace('>', ' style="margin-left:260px;min-height:480px;">', 1)
+                viewer_div_block = viewer_div_block.replace('>', ' style="margin-left:260px;min-height:480px;>', 1)
         # Ensure info/controls/panels have margin-left:260px; or are wrapped
         def ensure_margin_left(html_snip):
             # If already has margin-left:260px, return as is
@@ -561,185 +580,150 @@ def visualize_structure(pdb_data, width, height, chain_style, residue_style, out
             if viewer_div_block:
                 content += viewer_div_block
                 if viewer_script_block:
-                    content += viewer_script_block
+                    # --- Inject window.viewer assignment script after viewer_script_block ---
+                    # Find the viewer variable name
+                    viewer_var_match = re.search(r'var (viewer_\\d+) =', viewer_script_block)
+                    viewer_var = viewer_var_match.group(1) if viewer_var_match else None
+                    assign_script = ''
+                    if viewer_var:
+                        assign_script = f"""
+<script>
+(function() {{
+  // Assign the py3Dmol viewer variable to window.viewer for global access
+  if (typeof window.{viewer_var} === 'object' && typeof window.{viewer_var}.setStyle === 'function') {{
+    window.viewer = window.{viewer_var};
+    console.log('[binding_visualizer] window.viewer assigned from {viewer_var}', window.viewer);
+    enableControls();
+  }} else {{
+    // fallback for $3Dmol.viewers
+    if (window.$3Dmol && $3Dmol.viewers) {{
+      for (var id in $3Dmol.viewers) {{
+        if ($3Dmol.viewers[id]) {{
+          window.viewer = $3Dmol.viewers[id];
+          console.log('[binding_visualizer] window.viewer assigned from $3Dmol.viewers', id, window.viewer);
+          enableControls();
+          break;
+        }}
+      }}
+    }}
+    if (!window.viewer) {{
+      console.error('[binding_visualizer] FATAL: viewer not found for global assignment!');
+    }}
+  }}
+}})();
+</script>
+"""
+                    content += viewer_script_block + assign_script
+                else:
+                    content += viewer_script_block if viewer_script_block else ''
             content += info_html_margin + controls_panel_margin
             html_final = before_body + content + after_body
         else:
-            html_final = sidebar_html
+            # Compose content in the same way as the if branch
+            content = sidebar_html
             if viewer_div_block:
-                html_final += viewer_div_block
+                content += viewer_div_block
                 if viewer_script_block:
-                    html_final += viewer_script_block
-            html_final += info_html_margin + controls_panel_margin + html_wo_viewer
-
-        # --- Remove any existing <script src="https://3Dmol.csb.pitt.edu/build/3Dmol-min.js"></script> and <script src="3Dmol-min.js"></script> ---
-        html_final = re.sub(r'<script\s+src="https://3Dmol\\.csb\\.pitt\\.edu/build/3Dmol-min\\.js"></script>', '', html_final)
-        html_final = re.sub(r'<script\s+src="3Dmol-min\\.js"></script>', '', html_final)
-
-        # --- Inline 3Dmol-min.js directly into HTML for full portability ---
-        with open(local_js_path, "r", encoding="utf-8") as f:
-            js_code = f.read()
-        js_inline = f"<script>\n{js_code}\n</script>\n"
-        # Prepend the inlined JS to the HTML (ideally after <head>, else at top)
-        if "<head>" in html_final:
-            html_final = html_final.replace("<head>", "<head>\n" + js_inline)
-        else:
-            html_final = js_inline + html_final
-
-        print(Fore.CYAN + "[ORDER] HTML content order: sidebar, viewer, info, controls" + Style.RESET_ALL)
-        if viewer_div_block:
-            print(Fore.CYAN + "[ORDER] Viewer block injected after sidebar." + Style.RESET_ALL)
-        else:
-            print(Fore.YELLOW + "[ORDER] Viewer block missing, only sidebar/info/controls written." + Style.RESET_ALL)
-        # --- Add robust JS at the end of body to assign window.viewer ---
-        match = re.search(r'var (viewer_\d+) = null;', html)
-        viewer_var = match.group(1) if match else None
-        robust_js = '''<script>
-document.addEventListener('DOMContentLoaded', function() {
-  try {
-    var found = false;
-    console.log('[binding_visualizer] Robust viewer assignment script starting...');
-'''
-        if viewer_var:
-            robust_js += f"    console.log('[binding_visualizer] Attempting assignment from global variable {viewer_var}...');\n"
-            robust_js += f"    if(typeof window.{viewer_var} !== 'undefined' && window.{viewer_var} !== null) {{\n"
-            robust_js += f"      window.viewer = window.{viewer_var}; found = true;\n"
-            robust_js += f"      console.log('[binding_visualizer] window.viewer assigned from {viewer_var}', window.viewer);\n"
-            robust_js += f"    }} else {{\n"
-            robust_js += f"      console.log('[binding_visualizer] {viewer_var} not found or null.');\n"
-            robust_js += f"    }}\n"
-        robust_js += '''
-    // Try $3Dmol.viewers
-    if(!found && typeof window.$3Dmol !== 'undefined' && window.$3Dmol.viewers) {
-      console.log('[binding_visualizer] Attempting assignment from $3Dmol.viewers...');
-      for(var k in window.$3Dmol.viewers) {
-        if(window.$3Dmol.viewers[k]) {
-          window.viewer = window.$3Dmol.viewers[k]; found = true;
-          console.log('[binding_visualizer] window.viewer assigned from $3Dmol.viewers', window.viewer);
+                    # --- Inject window.viewer assignment script after viewer_script_block ---
+                    viewer_var_match = re.search(r'var (viewer_\\d+) =', viewer_script_block)
+                    viewer_var = viewer_var_match.group(1) if viewer_var_match else None
+                    assign_script = ''
+                    if viewer_var:
+                        assign_script = f"""
+<script>
+(function() {{
+  if (typeof window.{viewer_var} === 'object' && typeof window.{viewer_var}.setStyle === 'function') {{
+    window.viewer = window.{viewer_var};
+    console.log('[binding_visualizer] window.viewer assigned from {viewer_var}', window.viewer);
+    enableControls();
+  }} else {{
+    if (window.$3Dmol && $3Dmol.viewers) {{
+      for (var id in $3Dmol.viewers) {{
+        if ($3Dmol.viewers[id]) {{
+          window.viewer = $3Dmol.viewers[id];
+          console.log('[binding_visualizer] window.viewer assigned from $3Dmol.viewers', id, window.viewer);
+          enableControls();
           break;
-        }
-      }
-      if(!found) {
-        console.log('[binding_visualizer] No viewer found in $3Dmol.viewers');
-      }
-    }
-    // Try by DOM id
-    if(!found) {
-      console.log('[binding_visualizer] Attempting assignment by DOM id...');
-      var div = document.querySelector('div[id^="viewer"]');
-      if(div && typeof $3Dmol !== 'undefined') {
-        try {
-          window.viewer = $3Dmol.getViewer(div);
-          if(window.viewer) { found = true; console.log('[binding_visualizer] window.viewer assigned from $3Dmol.getViewer', window.viewer); }
-          else { console.log('[binding_visualizer] $3Dmol.getViewer returned null/undefined'); }
-        } catch(e) {
-          console.error('[binding_visualizer] Exception in $3Dmol.getViewer:', e);
-        }
-      } else {
-        console.log('[binding_visualizer] Could not find viewer div or $3Dmol is undefined.');
-      }
-    }
-    if(!found) {
-      console.error('[binding_visualizer] 3Dmol viewer not initialized!');
-      var warn = document.createElement('div');
-      warn.style='color:red;font-weight:bold;margin:16px;';
-      warn.innerText='[binding_visualizer] ERROR: 3Dmol viewer failed to initialize.';
-      document.body.insertBefore(warn, document.body.firstChild);
-    } else {
-      console.log('[binding_visualizer] 3Dmol viewer is ready:', window.viewer);
-    }
-    console.log('[binding_visualizer] Robust viewer assignment script finished.');
-  } catch(e) {
-    console.error('[binding_visualizer] Exception during viewer assignment:', e);
-    var warn = document.createElement('div');
-    warn.style='color:red;font-weight:bold;margin:16px;';
-    warn.innerText='[binding_visualizer] ERROR: Exception during 3Dmol viewer assignment.';
-    document.body.insertBefore(warn, document.body.firstChild);
-  }
-});
-</script>'''
-        if '</body>' in html_final:
-            html_final = html_final.replace('</body>', robust_js + '</body>')
-        else:
-            html_final += robust_js
+        }}
+      }}
+    }}
+    if (!window.viewer) {{
+      console.error('[binding_visualizer] FATAL: viewer not found for global assignment!');
+    }}
+  }}
+}})();
+</script>
+"""
+                    content += viewer_script_block + assign_script
+                else:
+                    content += viewer_script_block if viewer_script_block else ''
+            content += info_html_margin + controls_panel_margin
+            html_final = content
+
+        # --- Final HTML tweaks ---
+        # Ensure <html> tag has lang attribute
+        if '<html' in html_final and 'lang=' not in html_final:
+            html_final = html_final.replace('<html', '<html lang="en"')
+        # Ensure <meta> charset is set
+        if '<meta' in html_final and 'charset=' not in html_final:
+            html_final = html_final.replace('<meta', '<meta charset="UTF-8"')
+        # Ensure <title> is set
+        if '<title>' not in html_final:
+            html_final = html_final.replace('<head>', '<head><title>PDB Structure Viewer</title>')
+        # Ensure body has margin
+        if '<body' in html_final and 'style=' not in html_final:
+            html_final = html_final.replace('<body', '<body style="margin:0;"')
+
+        # --- Debug: Save intermediate HTML for inspection ---
+        debug_html_path = os.path.join(this_script_folder_path, f"debug_{pdb_id}.html")
+        with open(debug_html_path, 'w') as debug_file:
+            debug_file.write(html_final)
+        print(Fore.YELLOW + f"[DEBUG] Intermediate HTML saved to {debug_html_path}. Inspect for troubleshooting." + Style.RESET_ALL)
+
+        # Write final HTML to file
         html_file.write(html_final)
-        logging.info("Visualization saved to %s", output_html)
-        # Print summary about JS presence and file paths
-        local_js_present = os.path.exists(os.path.join(this_script_folder_path, "3Dmol-min.js"))
-        output_exists = os.path.exists(output_html)
-        print(Fore.CYAN + "[SUMMARY] Output HTML written to:", output_html, Style.RESET_ALL)
-        print(Fore.CYAN + "[SUMMARY] Local 3Dmol-min.js present:", local_js_present, Style.RESET_ALL)
-        print(Fore.CYAN + "[SUMMARY] Output HTML exists:", output_exists, Style.RESET_ALL)
-        print(Fore.YELLOW + "Open this file in browser with file:// (no server needed). If viewer is still blank, inspect Console for [binding_visualizer] errors." + Style.RESET_ALL)
-        print(Fore.CYAN + "[ORDER] Final HTML written: sidebar, viewer, info, controls." + Style.RESET_ALL)
-        # Optionally: Export JSON metadata
-        if config.get('export_json', False):
-            print(Fore.CYAN + f"[INFO] Exporting JSON metadata for {pdb_id}" + Style.RESET_ALL)
-            meta = dict(
-                pdb_id=pdb_id,
-                title=pdb_title,
-                method=pdb_meta['method'],
-                resolution=pdb_meta['resolution'],
-                ligands=pdb_meta['ligands'],
-                chains=pdb_meta['chains'],
-                binding_residues=binding_residues,
-                mutations=mutation_list,
-                therapies=therapies,
-                pathways=pathways,
-                literature=literature,
-                validation=validation,
-                citation=citation,
-                script_hash=script_hash,
-                config_hash=config_hash,
-                git_hash=git_hash,
-                user=user,
-                host=host,
-                python_version=os.sys.version.split()[0],
-                platform=f"{platform.system()} {platform.release()}",
-                timestamp=datetime.datetime.now().isoformat()
-            )
-            with open(os.path.join(this_script_folder_path, f"{pdb_id}_metadata.json"), 'w') as jf:
-                json.dump(meta, jf, indent=2)
-            print(Fore.GREEN + f"[SUCCESS] JSON metadata exported to {pdb_id}_metadata.json" + Style.RESET_ALL)
 
-def main():
-    print(Fore.CYAN + "[INFO] Starting binding_visualizer main workflow..." + Style.RESET_ALL)
-    """
-    Main function to execute the PDB data fetching and visualization workflow.
+    # --- Always append robust assignment script at the end of the HTML file ---
+    robust_assign_script = '''
+<script>
+(function() {
+  function enableControls() {
+    var btns = document.querySelectorAll('#bv-controls button');
+    btns.forEach(function(b) { b.disabled = false; });
+  }
+  for (var k in window) {
+    if (/^viewer_\d+$/.test(k) && typeof window[k] === "object" && typeof window[k].setStyle === "function") {
+      window.viewer = window[k];
+      console.log("[binding_visualizer] window.viewer assigned from", k, window.viewer);
+      enableControls();
+      break;
+    }
+  }
+  if (!window.viewer && window.$3Dmol && $3Dmol.viewers) {
+    for (var id in $3Dmol.viewers) {
+      if ($3Dmol.viewers[id]) {
+        window.viewer = $3Dmol.viewers[id];
+        console.log("[binding_visualizer] window.viewer assigned from $3Dmol.viewers", id, window.viewer);
+        enableControls();
+        break;
+      }
+    }
+  }
+  if (!window.viewer) {
+    console.error("[binding_visualizer] FATAL: viewer not found for global assignment!");
+  }
+})();
+</script>
+'''
+    # Append to the HTML file
+    with open(output_html, 'a') as f:
+        f.write(robust_assign_script)
 
-    Workflow:
-        - Uses settings from configuration files for PDB ID, viewer dimensions, and visualization styles.
-        - Fetches the PDB data using `fetch_pdb_data`.
-        - Visualizes the data using `visualize_structure`.
-        - Handles any exceptions, logs errors, and prints a traceback for debugging.
-    """
-    # Initialize logging configuration
-    logging.basicConfig(
-        filename=os.path.join(this_script_folder_path, "binding_visualizer.log"),
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s"
-    )
-    try:
-        print(Fore.CYAN + f"[INFO] Fetching PDB data for {config['pdb_id']}..." + Style.RESET_ALL)
-        # Fetch the PDB data using the helper
-        pdb_data = fetch_pdb_data(config['pdb_id'])
-        print(Fore.CYAN + f"[INFO] Visualizing structure for {config['pdb_id']}..." + Style.RESET_ALL)
-        # Visualize the structure using the fetched data
-        output_html = os.path.join(this_script_folder_path, f"{config['pdb_id']}_structure_viewer.html")
-        visualize_structure(
-            pdb_data, 
-            config['viewer']['width'], 
-            config['viewer']['height'], 
-            config['visualization']['chain_style'], 
-            config['visualization']['residue_style'], 
-            output_html
-        )
-        print(Fore.GREEN + f"[SUCCESS] Workflow completed for {config['pdb_id']}!" + Style.RESET_ALL)
-        print(Fore.CYAN + "[DEBUG] To troubleshoot in your browser: open the HTML file, right-click and select 'Inspect' (Chrome/Edge) or 'Inspect Element' (Firefox) to open Developer Tools. Check the Console tab for [binding_visualizer] logs. If the viewer does not appear, check for errors related to 3Dmol-min.js loading. Try serving the HTML via a local HTTP server (python -m http.server) and reload the page." + Style.RESET_ALL)
-    except Exception as error:
-        logging.error("An error occurred in the main function: %s", error)
-        print(Fore.RED + "An error occurred. Traceback is shown below:" + Style.RESET_ALL)
-        print(Fore.YELLOW + traceback.format_exc() + Style.RESET_ALL)
+    print(Fore.GREEN + f"[SUCCESS] Visualization saved to {output_html}" + Style.RESET_ALL)
+    print(Fore.CYAN + "[INFO] Opening visualization in default web browser..." + Style.RESET_ALL)
+    # Open the saved HTML file in the default web browser
+    import webbrowser
+    webbrowser.open('file://' + os.path.realpath(output_html))
 
 # --- Sidebar HTML (simple placeholder) ---
 sidebar_html = f"""
@@ -761,6 +745,38 @@ sidebar_html = f"""
 """
 # --- End Sidebar HTML ---
 
-# Execute the main function if the script is run as the main module
+# --- Debug: Save sidebar HTML to file ---
+debug_sidebar_path = os.path.join(this_script_folder_path, "debug_sidebar.html")
+with open(debug_sidebar_path, 'w') as debug_file:
+    debug_file.write(sidebar_html)
+print(Fore.YELLOW + f"[DEBUG] Sidebar HTML saved to {debug_sidebar_path}. Inspect for troubleshooting." + Style.RESET_ALL)
+
+def main():
+    print(Fore.CYAN + '[DEBUG] Entered main()' + Style.RESET_ALL)
+    # Initialize logging configuration
+    logging.basicConfig(
+        filename=os.path.join(this_script_folder_path, "binding_visualizer.log"),
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s"
+    )
+    try:
+        print(Fore.CYAN + f"[DEBUG] About to fetch PDB data for {config['pdb_id']}..." + Style.RESET_ALL)
+        pdb_data = fetch_pdb_data(config['pdb_id'])
+        print(Fore.CYAN + f"[DEBUG] About to visualize structure for {config['pdb_id']}..." + Style.RESET_ALL)
+        output_html = os.path.join(this_script_folder_path, f"{config['pdb_id']}_structure_viewer.html")
+        visualize_structure(
+            pdb_data, 
+            config['viewer']['width'], 
+            config['viewer']['height'], 
+            config['visualization']['chain_style'], 
+            config['visualization']['residue_style'], 
+            output_html
+        )
+        print(Fore.GREEN + f"[DEBUG] Workflow completed for {config['pdb_id']}!" + Style.RESET_ALL)
+    except Exception as error:
+        logging.error("An error occurred in the main function: %s", error)
+        print(Fore.RED + "[DEBUG] An error occurred. Traceback is shown below:" + Style.RESET_ALL)
+        print(Fore.YELLOW + traceback.format_exc() + Style.RESET_ALL)
+
 if __name__ == "__main__":
     main()

@@ -194,32 +194,3 @@ literature:
       }}
     </script>
     
-<script>
-(function() {
-  function enableControls() {
-    var btns = document.querySelectorAll('#bv-controls button');
-    btns.forEach(function(b) { b.disabled = false; });
-  }
-  for (var k in window) {
-    if (/^viewer_\d+$/.test(k) && typeof window[k] === "object" && typeof window[k].setStyle === "function") {
-      window.viewer = window[k];
-      console.log("[binding_visualizer] window.viewer assigned from", k, window.viewer);
-      enableControls();
-      break;
-    }
-  }
-  if (!window.viewer && window.$3Dmol && $3Dmol.viewers) {
-    for (var id in $3Dmol.viewers) {
-      if ($3Dmol.viewers[id]) {
-        window.viewer = $3Dmol.viewers[id];
-        console.log("[binding_visualizer] window.viewer assigned from $3Dmol.viewers", id, window.viewer);
-        enableControls();
-        break;
-      }
-    }
-  }
-  if (!window.viewer) {
-    console.error("[binding_visualizer] FATAL: viewer not found for global assignment!");
-  }
-})();
-</script>
