@@ -1,3 +1,20 @@
+def ensure_local_3dmoljs(local_js_path):
+    if not os.path.exists(local_js_path):
+        print(Fore.YELLOW + f"[WARNING] 3Dmol-min.js not found at {local_js_path}. Downloading..." + Style.RESET_ALL)
+        url = "https://3Dmol.csb.pitt.edu/build/3Dmol-min.js"
+        try:
+            r = requests.get(url, timeout=30)
+            r.raise_for_status()
+            with open(local_js_path, "wb") as f:
+                f.write(r.content)
+            print(Fore.GREEN + "[SUCCESS] 3Dmol-min.js downloaded and saved." + Style.RESET_ALL)
+            # Print first 100 bytes for verification
+            with open(local_js_path, "rb") as f:
+                first_bytes = f.read(100)
+            print(Fore.CYAN + "[DEBUG] First 100 bytes of 3Dmol-min.js: " + repr(first_bytes) + Style.RESET_ALL)
+        except Exception as e:
+            print(Fore.RED + f"[ERROR] Failed to download 3Dmol-min.js: {e}" + Style.RESET_ALL)
+            raise RuntimeError("Failed to download 3Dmol-min.js for offline use.") from e
 import py3Dmol
 import requests
 import logging
@@ -134,6 +151,8 @@ def visualize_structure(pdb_data, width, height, chain_style, residue_style, out
         - Sets visualization styles for different parts of the molecule.
         - Saves the viewer as an HTML file.
     """
+    local_js_path = os.path.join(this_script_folder_path, "3Dmol-min.js")
+    ensure_local_3dmoljs(local_js_path)
     print(Fore.CYAN + f"[INFO] Initializing 3Dmol viewer with width={width}, height={height}" + Style.RESET_ALL)
     # Log that the viewer is being initialized
     logging.info("Initializing 3Dmol viewer.")
@@ -153,17 +172,20 @@ def visualize_structure(pdb_data, width, height, chain_style, residue_style, out
     viewer.zoomTo()
     # Set hoverable with a callback to display labels for atoms, and clear labels on unhover
     print(Fore.CYAN + "[INFO] Setting hoverable labels..." + Style.RESET_ALL)
-    viewer.setHoverable({}, True, "function(atom, viewer) { \
-        if(atom) { \
-            viewer.addLabel(atom.chain + ' - ' + atom.resn, { \
-                position: { x: atom.x, y: atom.y, z: atom.z }, \
-                backgroundColor: 'black', \
-                fontColor: 'white', \
-                fontSize: 10, \
-                showBackground: true \
-            }); \
-        } \
-    }", "function(atom, viewer) { viewer.removeAllLabels(); }")
+    viewer.setHoverable({}, True,
+        'function(atom, viewer) {\n'
+        '  if(atom) {\n'
+        '    viewer.addLabel(atom.chain + " - " + atom.resn, {\n'
+        '      position: { x: atom.x, y: atom.y, z: atom.z },\n'
+        '      backgroundColor: "black",\n'
+        '      fontColor: "white",\n'
+        '      fontSize: 10,\n'
+        '      showBackground: true\n'
+        '    });\n'
+        '  }\n'
+        '}\n',
+        'function(atom, viewer) { viewer.removeAllLabels(); }'
+    )
 
     # Enable user interaction such as rotation and zoom
     viewer.setBackgroundColor('white')
@@ -381,181 +403,215 @@ def visualize_structure(pdb_data, width, height, chain_style, residue_style, out
         {'chain': m.get('chain'), 'resnum': m.get('resnum'), 'mutation': m.get('mutation')}
         for m in mutation_list
     ]
-    # --- Sidebar HTML ---
-    sidebar_html = ("""
-    <div id='bv-sidebar' style='position:fixed;top:0;left:0;width:260px;height:100vh;background:#f8f9fa;border-right:1px solid #e1e4e8;z-index:1000;padding:18px 12px 12px 18px;overflow-y:auto;font-family:Arial,sans-serif;'>
-        <h3 style='margin-top:0;color:#2a5298;'>Controls</h3>
-        <div style='margin-bottom:12px;'>
-            <b>Chains:</b><br>
-            """ + ''.join([f"<label style='display:block;'><input type='checkbox' class='bv-chain' value='{c}' checked> {c}</label>" for c in js_chains]) + """
-        </div>
-        <div style='margin-bottom:12px;'>
-            <b>Ligands:</b><br>
-            """ + ''.join([f"<label style='display:block;'><input type='checkbox' class='bv-ligand' value='{l}' checked> {l}</label>" for l in js_ligands]) + """
-        </div>
-        <div style='margin-bottom:12px;'>
-            <b>Mutations:</b><br>
-            """ + ''.join([f"<label style='display:block;'><input type='checkbox' class='bv-mutation' value='{m['chain']}:{m['resnum']}'> {m['mutation']} ({m['chain']}:{m['resnum']})</label>" for m in js_mutations]) + """
-        </div>
-        <div style='margin-bottom:12px;'>
-            <b>Style:</b><br>
-            <select id='bv-style'>
-                <option value='cartoon'>Cartoon</option>
-                <option value='stick'>Stick</option>
-                <option value='sphere'>Sphere</option>
-                <option value='line'>Line</option>
-            </select>
-        </div>
-        <div style='margin-bottom:12px;'>
-            <b>Color:</b><br>
-            <select id='bv-color'>
-                <option value='chain'>By Chain</option>
-                <option value='element'>By Element</option>
-                <option value='spectrum'>Spectrum</option>
-                <option value='residue'>By Residue</option>
-            </select>
-        </div>
-        <div style='margin-bottom:12px;'>
-            <button id='bv-export-png' style='width:100%;padding:6px 0;background:#2a5298;color:#fff;border:none;border-radius:4px;cursor:pointer;'>Export PNG</button>
-        </div>
+    mutation_js_array = json.dumps([
+        {"chain": m["chain"], "resi": m["resnum"]}
+        for m in mutation_list
+    ])
+    # --- New: Interactive Controls Panel ---
+    # Build button HTML outside the f-string to avoid curly brace issues
+    chain_buttons = ''.join([
+        f"<button onclick=\"window.viewer.setStyle({{chain: '{c}'}}, {{stick:{{colorscheme:'redCarbon'}}}}); window.viewer.render();\">{c}</button>"
+        for c in js_chains
+    ])
+    ligand_buttons = ''.join([
+        f"<button onclick=\"window.viewer.setStyle({{resn: '{l}'}}, {{stick:{{colorscheme:'orangeCarbon'}}}}); window.viewer.render();\">{l}</button>"
+        for l in js_ligands
+    ])
+    controls_panel = f"""
+    <div id='bv-controls' style='margin:16px 0 24px 260px; padding:12px 16px; background:#f8f9fa; border-radius:8px; border:1px solid #e1e4e8;'>
+      <b>Interactive Controls:</b>
+      <div style='margin-top:8px;'>
+        <b>Chains:</b>
+        {chain_buttons}
+        <button onclick="window.viewer.setStyle({{}}, {{stick:{{}}}}); window.viewer.render();">Reset All</button>
+      </div>
+      <div style='margin-top:8px;'>
+        <b>Ligands:</b>
+        {ligand_buttons}
+      </div>
+      <div style='margin-top:8px;'>
+        <button onclick="highlightMutations()">Highlight Mutations</button>
+      </div>
+      <div style='margin-top:8px;'>
+        <b>Style:</b>
+        <button onclick="window.viewer.setStyle({{}}, {{cartoon:{{}}}}); window.viewer.render();">Cartoon</button>
+        <button onclick="window.viewer.setStyle({{}}, {{stick:{{}}}}); window.viewer.render();">Stick</button>
+        <button onclick="window.viewer.setStyle({{}}, {{sphere:{{}}}}); window.viewer.render();">Sphere</button>
+        <button onclick="window.viewer.setStyle({{}}, {{line:{{}}}}); window.viewer.render();">Line</button>
+      </div>
+      <div style='margin-top:8px;'>
+        <b>Color:</b>
+        <button onclick="window.viewer.setStyle({{}}, {{cartoon: {{color: 'spectrum'}}}}); window.viewer.render();">Spectrum</button>
+        <button onclick="window.viewer.setStyle({{}}, {{cartoon: {{color: 'chain'}}}}); window.viewer.render();">By Chain</button>
+        <button onclick="window.viewer.setStyle({{}}, {{cartoon: {{color: 'element'}}}}); window.viewer.render();">By Element</button>
+        <button onclick="window.viewer.setStyle({{}}, {{cartoon: {{color: 'residue'}}}}); window.viewer.render();">By Residue</button>
+      </div>
     </div>
-    <style>@media (max-width: 600px) { #bv-sidebar { display:none; } }</style>
-    <script type='text/javascript'>
-    function bv_update_viewer() {
-        if(typeof window.viewer === 'undefined') return;
-        // Chains
-        var chains = Array.from(document.querySelectorAll('.bv-chain:checked')).map(cb=>cb.value);
-        // Ligands
-        var ligands = Array.from(document.querySelectorAll('.bv-ligand:checked')).map(cb=>cb.value);
-        // Mutations
-        var mutations = Array.from(document.querySelectorAll('.bv-mutation:checked')).map(cb=>cb.value);
-        // Style
-        var style = document.getElementById('bv-style').value;
-        // Color
-        var color = document.getElementById('bv-color').value;
-        window.viewer.setStyle({}, {});
-        // Show selected chains
-        chains.forEach(function(chain) {
-            var styleObj = {};
-            styleObj[style] = {colorscheme: color+'Carbon'};
-            window.viewer.setStyle({chain: chain}, styleObj);
-        });
-        // Show selected ligands
-        ligands.forEach(function(lig) {
-            window.viewer.setStyle({resn: lig}, {stick: {colorscheme: 'yellowCarbon'}});
-        });
-        // Highlight selected mutations
-        mutations.forEach(function(mut) {
-            var parts = mut.split(':');
-            if(parts.length===2) {
-                window.viewer.setStyle({chain: parts[0], resi: parseInt(parts[1])}, {stick: {colorscheme: 'magentaCarbon'}});
-            }
-        });
+    <script>
+      var mutations = {mutation_js_array};
+      function highlightMutations() {{
+        window.viewer.setStyle({{}}, {{}}); // clear
+        mutations.forEach(function(m) {{
+          window.viewer.setStyle({{chain: m.chain, resi: m.resi}}, {{stick: {{colorscheme: 'magentaCarbon'}}}});
+        }});
         window.viewer.render();
-    }
-    document.addEventListener('DOMContentLoaded', function() {
-        document.querySelectorAll('.bv-chain, .bv-ligand, .bv-mutation').forEach(function(cb) {
-            cb.addEventListener('change', bv_update_viewer);
-        });
-        document.getElementById('bv-style').addEventListener('change', bv_update_viewer);
-        document.getElementById('bv-color').addEventListener('change', bv_update_viewer);
-        var pngBtn = document.getElementById('bv-export-png');
-        if(pngBtn) pngBtn.onclick = function() {
-            if(window.viewer) window.viewer.pngURI(function(uri){
-                var a = document.createElement('a');
-                a.href = uri; a.download = 'structure.png'; a.click();
-            });
-        };
-    });
+      }}
     </script>
-    <div style='margin-left:260px;'></div>
-    """)
-    # --- End Sidebar HTML ---
+    """
+    # --- End Interactive Controls Panel ---
 
-    controls_html = (
-        "<div style='margin:16px 0;padding:12px 16px;background:#f8f9fa;border-radius:8px;border:1px solid #e1e4e8;'>"
-        "<b>Interactive Controls:</b>"
-        "<div style='margin-top:8px;'>"
-        "<label for='chain-select'>Chain:</label>"
-        "<select id='chain-select'>"
-        + ''.join([f"<option value='{c}'>{c}</option>" for c in js_chains]) +
-        "</select>"
-        "<button onclick=\"updateChain()\">Show Only</button>"
-        "</div>"
-        "<div style='margin-top:8px;'>"
-        "<label for='ligand-select'>Ligand:</label>"
-        "<select id='ligand-select'>"
-        + ''.join([f"<option value='{l}'>{l}</option>" for l in js_ligands]) +
-        "</select>"
-        "<button onclick=\"highlightLigand()\">Highlight</button>"
-        "</div>"
-        "<div style='margin-top:8px;'>"
-        "<label for='mutation-select'>Mutation:</label>"
-        "<select id='mutation-select'>"
-        + ''.join([f"<option value='{m['chain']}:{m['resnum']}'>{m['mutation']} ({m['chain']}:{m['resnum']})</option>" for m in js_mutations]) +
-        "</select>"
-        "<button onclick=\"highlightMutation()\">Highlight</button>"
-        "</div>"
-        "</div>"
-        "<script>"
-        "function updateChain() {"
-        "  var chain = document.getElementById('chain-select').value;"
-        "  if(typeof viewer === 'undefined') return;"
-        "  viewer.setStyle({}, {});"
-        "  viewer.setStyle({chain: chain}, {stick: {}});"
-        "  viewer.render();"
-        "}"
-        "function highlightLigand() {"
-        "  var ligand = document.getElementById('ligand-select').value;"
-        "  if(typeof viewer === 'undefined') return;"
-        "  viewer.setStyle({}, {});"
-        "  viewer.setStyle({resn: ligand}, {stick: {colorscheme: 'yellowCarbon'}});"
-        "  viewer.render();"
-        "}"
-        "function highlightMutation() {"
-        "  var sel = document.getElementById('mutation-select').value;"
-        "  var parts = sel.split(':');"
-        "  if(parts.length !== 2 || typeof viewer === 'undefined') return;"
-        "  var chain = parts[0];"
-        "  var resi = parseInt(parts[1]);"
-        "  viewer.setStyle({}, {});"
-        "  viewer.setStyle({chain: chain, resi: resi}, {stick: {colorscheme: 'magentaCarbon'}});"
-        "  viewer.render();"
-        "}"
-        "window.addEventListener('viewerReady', function(e) { window.viewer = e.detail.viewer; });"
-        "</script>"
-    )
-    print(Fore.CYAN + f"[INFO] Saving visualization HTML to {output_html}" + Style.RESET_ALL)
     # Save the visualization to an HTML file, prepending info
+    import re
+    def inject_js_head(html, js_path="3Dmol-min.js"):
+        js_tag = f'<script src="{js_path}"></script>'
+        if "<head>" in html:
+            # Only add if not already present
+            if js_tag not in html:
+                html = html.replace("<head>", "<head>\n" + js_tag)
+        else:
+            # No <head> found, inject at top
+            html = js_tag + "\n" + html
+        return html
     with open(output_html, 'w') as html_file:
         html = viewer._make_html()
-        import re
+        # --- Extract the 3Dmol viewer <div> block and script ---
+        viewer_div_block = None
+        viewer_div_id = None
+        viewer_div_style = None
+        viewer_script_block = None
+        # Find the <div id="3dmolviewer_...">...</div> block
+        div_pattern = re.compile(r'(<div\s+id="(3dmolviewer_[^"]+)"([^>]*)>.*?</div>)', re.DOTALL)
+        div_match = div_pattern.search(html)
+        if div_match:
+            viewer_div_block = div_match.group(1)
+            viewer_div_id = div_match.group(2)
+            viewer_div_style = div_match.group(3)
+            print(Fore.CYAN + f"[DIAGNOSTIC] Found viewer block id: {viewer_div_id}" + Style.RESET_ALL)
+            print(Fore.CYAN + f"[DIAGNOSTIC] Viewer block HTML (first 100 chars): {viewer_div_block[:100].replace(chr(10),' ')}..." + Style.RESET_ALL)
+            # --- Extract the viewer creation <script> block ---
+            # The viewer variable is usually viewer_xxxxx, derived from the div id
+            viewer_var = viewer_div_id.replace("3dmolviewer_", "viewer_")
+            # Try to find the script block that creates the viewer
+            script_pattern = re.compile(r'(<script>.*?var\s+' + re.escape(viewer_var) + r'\s*=.*?createViewer.*?</script>)', re.DOTALL)
+            script_match = script_pattern.search(html)
+            if script_match:
+                viewer_script_block = script_match.group(1)
+            else:
+                # Fallback: try to find any script block that contains createViewer and the viewer_var
+                script_pattern2 = re.compile(r'(<script>.*?' + re.escape(viewer_var) + r'.*?createViewer.*?</script>)', re.DOTALL)
+                script_match2 = script_pattern2.search(html)
+                if script_match2:
+                    viewer_script_block = script_match2.group(1)
+                else:
+                    print(Fore.YELLOW + f"[WARNING] Could not find viewer creation <script> block for {viewer_var}. The viewer may not initialize correctly." + Style.RESET_ALL)
+        else:
+            # Diagnostic: print all div ids found
+            all_ids = re.findall(r'<div\s+id="([^"]+)"', html)
+            print(Fore.RED + "[DIAGNOSTIC] Viewer block not found! HTML ids found: " + str(all_ids) + Style.RESET_ALL)
+        # --- Remove the viewer block and script from html ---
+        html_wo_viewer = html
+        if viewer_div_block:
+            html_wo_viewer = html_wo_viewer.replace(viewer_div_block, '')
+        if viewer_script_block:
+            html_wo_viewer = html_wo_viewer.replace(viewer_script_block, '')
+        # --- Ensure viewer div has margin-left:260px;min-height:480px; ---
+        if viewer_div_block:
+            # Ensure style attribute
+            if "style=" in viewer_div_block:
+                # Patch style string
+                style_match = re.search(r'style="([^"]*)"', viewer_div_block)
+                if style_match:
+                    style_val = style_match.group(1)
+                    # Add margin-left:260px;min-height:480px; if not present
+                    if 'margin-left:' not in style_val:
+                        style_val += ';margin-left:260px;'
+                    if 'min-height:' not in style_val:
+                        style_val += 'min-height:480px;'
+                    # Patch style in div
+                    viewer_div_block = re.sub(r'style="[^"]*"', f'style="{style_val}"', viewer_div_block)
+            else:
+                # Insert style attribute
+                viewer_div_block = viewer_div_block.replace('>', ' style="margin-left:260px;min-height:480px;">', 1)
+        # Ensure info/controls/panels have margin-left:260px; or are wrapped
+        def ensure_margin_left(html_snip):
+            # If already has margin-left:260px, return as is
+            if "margin-left:260px" in html_snip:
+                return html_snip
+            # Add margin-left:260px to top div or wrap in div
+            m = re.match(r'^(\s*<div[^>]*style=")([^"]*)"', html_snip)
+            if m:
+                style_str = m.group(2)
+                if "margin-left:" not in style_str:
+                    new_style = style_str + ";margin-left:260px;"
+                    html_snip = html_snip.replace(m.group(0), m.group(1) + new_style + '"', 1)
+                return html_snip
+            else:
+                # Wrap in a div
+                return f"<div style='margin-left:260px;'>{html_snip}</div>"
+        info_html_margin = ensure_margin_left(info_html)
+        controls_panel_margin = ensure_margin_left(controls_panel)
+
+        # --- Compose the HTML ---
+        # Find <body> tag in html_wo_viewer
+        if '<body>' in html_wo_viewer:
+            body_split = html_wo_viewer.split('<body>', 1)
+            before_body = body_split[0] + '<body>'
+            after_body = body_split[1]
+            content = sidebar_html
+            if viewer_div_block:
+                content += viewer_div_block
+                if viewer_script_block:
+                    content += viewer_script_block
+            content += info_html_margin + controls_panel_margin
+            html_final = before_body + content + after_body
+        else:
+            html_final = sidebar_html
+            if viewer_div_block:
+                html_final += viewer_div_block
+                if viewer_script_block:
+                    html_final += viewer_script_block
+            html_final += info_html_margin + controls_panel_margin + html_wo_viewer
+
+        # --- Remove any existing <script src="https://3Dmol.csb.pitt.edu/build/3Dmol-min.js"></script> and <script src="3Dmol-min.js"></script> ---
+        html_final = re.sub(r'<script\s+src="https://3Dmol\\.csb\\.pitt\\.edu/build/3Dmol-min\\.js"></script>', '', html_final)
+        html_final = re.sub(r'<script\s+src="3Dmol-min\\.js"></script>', '', html_final)
+
+        # --- Inline 3Dmol-min.js directly into HTML for full portability ---
+        with open(local_js_path, "r", encoding="utf-8") as f:
+            js_code = f.read()
+        js_inline = f"<script>\n{js_code}\n</script>\n"
+        # Prepend the inlined JS to the HTML (ideally after <head>, else at top)
+        if "<head>" in html_final:
+            html_final = html_final.replace("<head>", "<head>\n" + js_inline)
+        else:
+            html_final = js_inline + html_final
+
+        print(Fore.CYAN + "[ORDER] HTML content order: sidebar, viewer, info, controls" + Style.RESET_ALL)
+        if viewer_div_block:
+            print(Fore.CYAN + "[ORDER] Viewer block injected after sidebar." + Style.RESET_ALL)
+        else:
+            print(Fore.YELLOW + "[ORDER] Viewer block missing, only sidebar/info/controls written." + Style.RESET_ALL)
+        # --- Add robust JS at the end of body to assign window.viewer ---
         match = re.search(r'var (viewer_\d+) = null;', html)
         viewer_var = match.group(1) if match else None
-        # Insert sidebar_html at the top of <body>, and wrap the rest in a main content div with margin-left
-        if '<body>' in html:
-            viewer_div_match = re.search(r'(<div[^>]+id=["\\\']?viewer[^>]*>)', html)
-            if viewer_div_match:
-                viewer_div = viewer_div_match.group(1)
-                # Ensure the viewer div has explicit width/height styles
-                if 'style=' not in viewer_div:
-                    viewer_div_new = viewer_div[:-1] + " style='width:100%;height:100%;min-height:480px;min-width:480px;'" + viewer_div[-1]
-                    html = html.replace(viewer_div, viewer_div_new, 1)
-                else:
-                    viewer_div_new = re.sub(r'style=["\']', "style='min-width:480px;min-height:480px;", viewer_div, 1)
-                    html = html.replace(viewer_div, viewer_div_new, 1)
-                html = html.replace(viewer_div, f"<div id='bv-main' style='margin-left:260px;min-height:600px;'>\n" + viewer_div, 1)
-                html = html.replace('</body>', '</div></body>', 1)
-            html = html.replace('<body>', '<body>' + sidebar_html + info_html + controls_html, 1)
-        else:
-            html = sidebar_html + "<div id='bv-main' style='margin-left:260px;min-height:600px;'>" + info_html + controls_html + html + "</div>"
-        # Add robust JS at the end of body to assign window.viewer
-        robust_js = '''<script>\ndocument.addEventListener('DOMContentLoaded', function() {\n  try {\n    var found = false;\n    // Try to assign window.viewer from global variable\n    '''
+        robust_js = '''<script>
+document.addEventListener('DOMContentLoaded', function() {
+  try {
+    var found = false;
+    console.log('[binding_visualizer] Robust viewer assignment script starting...');
+'''
         if viewer_var:
-            robust_js += f"if(typeof window.{viewer_var} !== 'undefined' && window.{viewer_var} !== null) {{ window.viewer = window.{viewer_var}; found = true; console.log('[binding_visualizer] window.viewer assigned from {viewer_var}', window.viewer); }}\n"
+            robust_js += f"    console.log('[binding_visualizer] Attempting assignment from global variable {viewer_var}...');\n"
+            robust_js += f"    if(typeof window.{viewer_var} !== 'undefined' && window.{viewer_var} !== null) {{\n"
+            robust_js += f"      window.viewer = window.{viewer_var}; found = true;\n"
+            robust_js += f"      console.log('[binding_visualizer] window.viewer assigned from {viewer_var}', window.viewer);\n"
+            robust_js += f"    }} else {{\n"
+            robust_js += f"      console.log('[binding_visualizer] {viewer_var} not found or null.');\n"
+            robust_js += f"    }}\n"
         robust_js += '''
     // Try $3Dmol.viewers
     if(!found && typeof window.$3Dmol !== 'undefined' && window.$3Dmol.viewers) {
+      console.log('[binding_visualizer] Attempting assignment from $3Dmol.viewers...');
       for(var k in window.$3Dmol.viewers) {
         if(window.$3Dmol.viewers[k]) {
           window.viewer = window.$3Dmol.viewers[k]; found = true;
@@ -563,15 +619,24 @@ def visualize_structure(pdb_data, width, height, chain_style, residue_style, out
           break;
         }
       }
+      if(!found) {
+        console.log('[binding_visualizer] No viewer found in $3Dmol.viewers');
+      }
     }
     // Try by DOM id
     if(!found) {
+      console.log('[binding_visualizer] Attempting assignment by DOM id...');
       var div = document.querySelector('div[id^="viewer"]');
       if(div && typeof $3Dmol !== 'undefined') {
         try {
           window.viewer = $3Dmol.getViewer(div);
           if(window.viewer) { found = true; console.log('[binding_visualizer] window.viewer assigned from $3Dmol.getViewer', window.viewer); }
-        } catch(e) {}
+          else { console.log('[binding_visualizer] $3Dmol.getViewer returned null/undefined'); }
+        } catch(e) {
+          console.error('[binding_visualizer] Exception in $3Dmol.getViewer:', e);
+        }
+      } else {
+        console.log('[binding_visualizer] Could not find viewer div or $3Dmol is undefined.');
       }
     }
     if(!found) {
@@ -583,6 +648,7 @@ def visualize_structure(pdb_data, width, height, chain_style, residue_style, out
     } else {
       console.log('[binding_visualizer] 3Dmol viewer is ready:', window.viewer);
     }
+    console.log('[binding_visualizer] Robust viewer assignment script finished.');
   } catch(e) {
     console.error('[binding_visualizer] Exception during viewer assignment:', e);
     var warn = document.createElement('div');
@@ -590,43 +656,51 @@ def visualize_structure(pdb_data, width, height, chain_style, residue_style, out
     warn.innerText='[binding_visualizer] ERROR: Exception during 3Dmol viewer assignment.';
     document.body.insertBefore(warn, document.body.firstChild);
   }
-});\n</script>'''
-        if '</body>' in html:
-            html = html.replace('</body>', robust_js + '</body>')
+});
+</script>'''
+        if '</body>' in html_final:
+            html_final = html_final.replace('</body>', robust_js + '</body>')
         else:
-            html += robust_js
-        html_file.write(html)
-    logging.info("Visualization saved to %s", output_html)
-    print(Fore.GREEN + f"Visualization saved to {output_html}. Open this file in a browser to view the structure." + Style.RESET_ALL)
-    # Optionally: Export JSON metadata
-    if config.get('export_json', False):
-        print(Fore.CYAN + f"[INFO] Exporting JSON metadata for {pdb_id}" + Style.RESET_ALL)
-        meta = dict(
-            pdb_id=pdb_id,
-            title=pdb_title,
-            method=pdb_meta['method'],
-            resolution=pdb_meta['resolution'],
-            ligands=pdb_meta['ligands'],
-            chains=pdb_meta['chains'],
-            binding_residues=binding_residues,
-            mutations=mutation_list,
-            therapies=therapies,
-            pathways=pathways,
-            literature=literature,
-            validation=validation,
-            citation=citation,
-            script_hash=script_hash,
-            config_hash=config_hash,
-            git_hash=git_hash,
-            user=user,
-            host=host,
-            python_version=os.sys.version.split()[0],
-            platform=f"{platform.system()} {platform.release()}",
-            timestamp=datetime.datetime.now().isoformat()
-        )
-        with open(os.path.join(this_script_folder_path, f"{pdb_id}_metadata.json"), 'w') as jf:
-            json.dump(meta, jf, indent=2)
-        print(Fore.GREEN + f"[SUCCESS] JSON metadata exported to {pdb_id}_metadata.json" + Style.RESET_ALL)
+            html_final += robust_js
+        html_file.write(html_final)
+        logging.info("Visualization saved to %s", output_html)
+        # Print summary about JS presence and file paths
+        local_js_present = os.path.exists(os.path.join(this_script_folder_path, "3Dmol-min.js"))
+        output_exists = os.path.exists(output_html)
+        print(Fore.CYAN + "[SUMMARY] Output HTML written to:", output_html, Style.RESET_ALL)
+        print(Fore.CYAN + "[SUMMARY] Local 3Dmol-min.js present:", local_js_present, Style.RESET_ALL)
+        print(Fore.CYAN + "[SUMMARY] Output HTML exists:", output_exists, Style.RESET_ALL)
+        print(Fore.YELLOW + "Open this file in browser with file:// (no server needed). If viewer is still blank, inspect Console for [binding_visualizer] errors." + Style.RESET_ALL)
+        print(Fore.CYAN + "[ORDER] Final HTML written: sidebar, viewer, info, controls." + Style.RESET_ALL)
+        # Optionally: Export JSON metadata
+        if config.get('export_json', False):
+            print(Fore.CYAN + f"[INFO] Exporting JSON metadata for {pdb_id}" + Style.RESET_ALL)
+            meta = dict(
+                pdb_id=pdb_id,
+                title=pdb_title,
+                method=pdb_meta['method'],
+                resolution=pdb_meta['resolution'],
+                ligands=pdb_meta['ligands'],
+                chains=pdb_meta['chains'],
+                binding_residues=binding_residues,
+                mutations=mutation_list,
+                therapies=therapies,
+                pathways=pathways,
+                literature=literature,
+                validation=validation,
+                citation=citation,
+                script_hash=script_hash,
+                config_hash=config_hash,
+                git_hash=git_hash,
+                user=user,
+                host=host,
+                python_version=os.sys.version.split()[0],
+                platform=f"{platform.system()} {platform.release()}",
+                timestamp=datetime.datetime.now().isoformat()
+            )
+            with open(os.path.join(this_script_folder_path, f"{pdb_id}_metadata.json"), 'w') as jf:
+                json.dump(meta, jf, indent=2)
+            print(Fore.GREEN + f"[SUCCESS] JSON metadata exported to {pdb_id}_metadata.json" + Style.RESET_ALL)
 
 def main():
     print(Fore.CYAN + "[INFO] Starting binding_visualizer main workflow..." + Style.RESET_ALL)
@@ -661,10 +735,31 @@ def main():
             output_html
         )
         print(Fore.GREEN + f"[SUCCESS] Workflow completed for {config['pdb_id']}!" + Style.RESET_ALL)
+        print(Fore.CYAN + "[DEBUG] To troubleshoot in your browser: open the HTML file, right-click and select 'Inspect' (Chrome/Edge) or 'Inspect Element' (Firefox) to open Developer Tools. Check the Console tab for [binding_visualizer] logs. If the viewer does not appear, check for errors related to 3Dmol-min.js loading. Try serving the HTML via a local HTTP server (python -m http.server) and reload the page." + Style.RESET_ALL)
     except Exception as error:
         logging.error("An error occurred in the main function: %s", error)
         print(Fore.RED + "An error occurred. Traceback is shown below:" + Style.RESET_ALL)
         print(Fore.YELLOW + traceback.format_exc() + Style.RESET_ALL)
+
+# --- Sidebar HTML (simple placeholder) ---
+sidebar_html = f"""
+<div id='bv-sidebar' style='position:fixed;top:0;left:0;width:240px;height:100%;background:#2a5298;color:#fff;padding:24px 12px 12px 12px;z-index:1000;overflow-y:auto;'>
+  <h2 style='font-size:20px;margin-top:0;margin-bottom:16px;'>MM Structure<br>Visualizer</h2>
+  <div style='font-size:14px;line-height:1.5;'>
+    <b>Controls:</b><br>
+    Use the interactive panel to explore chains, ligands, mutations, and styles.<br><br>
+    <b>Tips:</b><br>
+    - Drag to rotate<br>
+    - Scroll to zoom<br>
+    - Double-click to center<br>
+    - Hover for atom info<br>
+  </div>
+  <div style='position:absolute;bottom:16px;left:12px;font-size:11px;color:#cfd8dc;'>
+    &copy; {datetime.datetime.now().year} MM Lab
+  </div>
+</div>
+"""
+# --- End Sidebar HTML ---
 
 # Execute the main function if the script is run as the main module
 if __name__ == "__main__":
